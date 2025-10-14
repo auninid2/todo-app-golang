@@ -7,24 +7,18 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"sync"
-
 	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type Todo struct {
-	ID        int    `json:"_id" bson:"_id"`
+	ID        primitive.ObjectID   `json:"_id,omitempty" bson:"_id,omitempty"`
 	Completed bool   `json:"completed"`
 	Body      string `json:"body"`
 }
-
-var (
-	todos   []Todo
-	todoMux sync.Mutex
-)
 
 var collection *mongo.Collection
 
@@ -56,8 +50,8 @@ func main() {
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/todos", checkTodos)
 	router.HandleFunc("POST /api/todos", createTodo)
-	router.HandleFunc("PUT /api/todos/:id", updateTodo)
-	router.HandleFunc("DELETE /api/todos/:id", deleteTodo)
+	// router.HandleFunc("PUT /api/todos/:id", updateTodo)
+	// router.HandleFunc("DELETE /api/todos/:id", deleteTodo)
 
 	fmt.Println("Server listening to 8080")
 	http.ListenAndServe(":8080", router)
@@ -86,65 +80,27 @@ func checkTodos(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode(todos)
 }
 
-func updateTodo(w http.ResponseWriter, r *http.Request) {
-    idStr := r.URL.Path[len("/api/todos/"):]
-    var id int
-    _, err := fmt.Sscanf(idStr, "%d", &id)
-    if err != nil {
-        http.Error(w, "Invalid ID", http.StatusBadRequest)
-        return
-    }
-
-    todoMux.Lock()
-    defer todoMux.Unlock()
-    for i, todo := range todos {
-        if todo.ID == id {
-            todos[i].Completed = true
-            w.Header().Set("Content-Type", "application/json")
-            w.WriteHeader(http.StatusOK)
-            json.NewEncoder(w).Encode(todos[i])
-            return
-        }
-    }
-    http.Error(w, "todo not found", http.StatusNotFound)
-}
-
 func createTodo(w http.ResponseWriter, r *http.Request) {
-	todo := Todo{}
-	err := json.NewDecoder(r.Body).Decode(&todo)
-	if err != nil || todo.Body == "" {
-		http.Error(w, "Invalid input", http.StatusBadRequest)
-		return
-	}
-
-	todoMux.Lock()
-	todo.ID = len(todos) + 1
-	todos = append(todos, todo)
-	todoMux.Unlock()
-
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(todo)
-}
-
-func deleteTodo(w http.ResponseWriter, r *http.Request) {
-	idStr := r.URL.Path[len("/api/todos/"):]
-    var id int
-    _, err := fmt.Sscanf(idStr, "%d", &id)
-    if err != nil {
-        http.Error(w, "Invalid ID", http.StatusBadRequest)
+    var todo Todo
+    if err := json.NewDecoder(r.Body).Decode(&todo); err != nil {
+        http.Error(w, "Invalid request body", http.StatusBadRequest)
         return
     }
 
-	for i, todo := range todos {
-        if todo.ID == id {
-            deleted := todos[i] // Store the todo to return
-            todos = append(todos[:i], todos[i+1:]...)
-            w.Header().Set("Content-Type", "application/json")
-            w.WriteHeader(http.StatusOK)
-            json.NewEncoder(w).Encode(deleted)
-            return
-        }
+    if todo.Body == "" {
+        http.Error(w, "Todo body is required", http.StatusBadRequest)
+        return
     }
-    http.Error(w, "todo not found", http.StatusNotFound)
+
+    todo.Completed = false // Default to not completed
+    insertResult, err := collection.InsertOne(context.Background(), todo)
+    if err != nil {
+        http.Error(w, "Failed to create todo", http.StatusInternalServerError)
+        return
+    }
+
+    todo.ID = insertResult.InsertedID.(primitive.ObjectID)
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusCreated)
+    json.NewEncoder(w).Encode(todo)
 }
