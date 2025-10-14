@@ -1,14 +1,22 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"sync"
+
+	"github.com/joho/godotenv"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 type Todo struct {
-	ID        int    `json:"id"`
+	ID        int    `json:"_id" bson:"_id"`
 	Completed bool   `json:"completed"`
 	Body      string `json:"body"`
 }
@@ -18,22 +26,64 @@ var (
 	todoMux sync.Mutex
 )
 
+var collection *mongo.Collection
+
 func main() {
+	err := godotenv.Load(".env")
+	if err != nil {
+		log.Fatal("Failed loading .env file", err)
+	}
+
+	MONGODB_URI := os.Getenv("MONGODB_URI")
+	clientOptions := options.Client().ApplyURI(MONGODB_URI)
+	client, err := mongo.Connect(context.Background(), clientOptions)
+
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer client.Disconnect(context.Background())
+
+	err = client.Ping(context.Background(), nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	fmt.Println("Successfully connected to the database")	
+
+	collection = client.Database("golang_db").Collection("todos")
+
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/todos", checkTodos)
 	router.HandleFunc("POST /api/todos", createTodo)
-	router.HandleFunc("PUT /api/todos/", updateTodo)
-	router.HandleFunc("DELETE /api/todos/", deleteTodo)
+	router.HandleFunc("PUT /api/todos/:id", updateTodo)
+	router.HandleFunc("DELETE /api/todos/:id", deleteTodo)
 
 	fmt.Println("Server listening to 8080")
 	http.ListenAndServe(":8080", router)
 }
 
 func checkTodos(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	todoMux.Lock()
-	defer todoMux.Unlock()
-	json.NewEncoder(w).Encode(todos)
+    var todos []Todo
+
+    cursor, err := collection.Find(context.Background(), bson.M{})
+    if err != nil {
+        http.Error(w, "Failed to fetch todos", http.StatusInternalServerError)
+        return
+    }
+    defer cursor.Close(context.Background())
+
+    for cursor.Next(context.Background()) {
+        var todo Todo
+        if err := cursor.Decode(&todo); err != nil {
+            http.Error(w, "Failed to decode todo", http.StatusInternalServerError)
+            return
+        }
+        todos = append(todos, todo)
+    }
+
+    w.Header().Set("Content-Type", "application/json")
+    json.NewEncoder(w).Encode(todos)
 }
 
 func updateTodo(w http.ResponseWriter, r *http.Request) {
