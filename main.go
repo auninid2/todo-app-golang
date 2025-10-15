@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+
 	"github.com/joho/godotenv"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
@@ -50,8 +51,8 @@ func main() {
 	router := http.NewServeMux()
 	router.HandleFunc("GET /api/todos", checkTodos)
 	router.HandleFunc("POST /api/todos", createTodo)
-	// router.HandleFunc("PUT /api/todos/:id", updateTodo)
-	// router.HandleFunc("DELETE /api/todos/:id", deleteTodo)
+	router.HandleFunc("PUT /api/todos/", updateTodo)
+	router.HandleFunc("DELETE /api/todos/", deleteTodo)
 
 	fmt.Println("Server listening to 8080")
 	http.ListenAndServe(":8080", router)
@@ -92,7 +93,7 @@ func createTodo(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    todo.Completed = false // Default to not completed
+    todo.Completed = false 
     insertResult, err := collection.InsertOne(context.Background(), todo)
     if err != nil {
         http.Error(w, "Failed to create todo", http.StatusInternalServerError)
@@ -103,4 +104,54 @@ func createTodo(w http.ResponseWriter, r *http.Request) {
     w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(http.StatusCreated)
     json.NewEncoder(w).Encode(todo)
+}
+
+func updateTodo(w http.ResponseWriter, r *http.Request) {
+    id := r.URL.Path[len("/api/todos/"):]
+    if id == "" {
+        http.Error(w, "Missing ID", http.StatusBadRequest)
+        return
+    }
+    objectID, err := primitive.ObjectIDFromHex(id)
+    if err != nil {
+        http.Error(w, "Invalid ID", http.StatusBadRequest)
+        return
+    }
+
+    filter := bson.M{"_id": objectID}
+    update := bson.M{"$set": bson.M{"completed": true}}
+
+    _, err = collection.UpdateOne(context.Background(), filter, update)
+    if err != nil {
+        http.Error(w, "Failed to update todo", http.StatusInternalServerError)
+        return
+    }
+
+    w.WriteHeader(http.StatusNoContent)
+}
+
+func deleteTodo(w http.ResponseWriter, r *http.Request) {
+    id := r.URL.Path[len("/api/todos/"):]
+    if id == "" {
+        http.Error(w, "Missing ID", http.StatusBadRequest)
+        return
+    }
+    objectID, err := primitive.ObjectIDFromHex(id)
+    if err != nil {
+        http.Error(w, "Invalid ID", http.StatusBadRequest)
+        return
+    }
+
+    filter := bson.M{"_id": objectID}
+    result, err := collection.DeleteOne(context.Background(), filter)
+    if err != nil {
+        http.Error(w, "Failed to delete todo", http.StatusInternalServerError)
+        return
+    }
+    if result.DeletedCount == 0 {
+        http.Error(w, "Todo not found", http.StatusNotFound)
+        return
+    }
+
+    w.WriteHeader(http.StatusNoContent)
 }
