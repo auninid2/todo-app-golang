@@ -23,6 +23,22 @@ type Todo struct {
 
 var collection *mongo.Collection
 
+// CORS middleware
+func enableCORS(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "http://localhost:3000")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	}
+}
+
 func main() {
 	if err := godotenv.Load(".env"); err != nil {
 		log.Fatal("Failed loading .env file", err)
@@ -43,12 +59,11 @@ func main() {
 	fmt.Println("Successfully connected to the database")
 	collection = client.Database("golang_db").Collection("todos")
 
-	router := http.NewServeMux()
-	router.HandleFunc("/api/todos", todosHandler)
-	router.HandleFunc("/api/todos/", todoByIDHandler)
+	http.HandleFunc("/api/todos", enableCORS(todosHandler))
+	http.HandleFunc("/api/todos/", enableCORS(todoByIDHandler))
 
 	fmt.Println("Server listening on 8080")
-	http.ListenAndServe(":8080", router)
+	http.ListenAndServe(":8080", nil)
 }
 
 func todosHandler(w http.ResponseWriter, r *http.Request) {
