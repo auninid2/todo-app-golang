@@ -30,4 +30,7 @@ go.work.sum
 # Editor/IDE
 # .idea/
 .vscode/
-tmp/
+
+/frontend/node_modules
+/frontend/build
+/tmp
